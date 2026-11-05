@@ -1,0 +1,9 @@
+services:
+  api:
+    networks:
+      - default
+      - cms
+
+networks:
+  cms:
+    external: true

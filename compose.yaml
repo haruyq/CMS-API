@@ -1,0 +1,16 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      YTDLP_UPDATE_HOURS: ${YTDLP_UPDATE_HOURS:-24}
+    volumes:
+      - data:/data
+    restart: unless-stopped
+
+volumes:
+  data:
