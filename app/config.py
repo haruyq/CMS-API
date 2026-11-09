@@ -29,3 +29,9 @@ EXTENSION_URL = os.getenv("EXTENSION_URL", "")
 EXTENSION_TOKEN = os.getenv("EXTENSION_TOKEN", "")
 # Where Minecraft clients reach the extension; its /video and /stream go there instead of through this API.
 EXTENSION_PUBLIC_URL = os.getenv("EXTENSION_PUBLIC_URL", "")
+# Direct P2P signaling (/p2p). Shared only between this API and the Minecraft server, never players. Empty disables it.
+P2P_SERVER_TOKEN = os.getenv("P2P_SERVER_TOKEN", "")
+# STUN servers players use to find their public address. Empty is enough on a LAN. Never TURN: media stays direct.
+P2P_STUN_URLS = _list("P2P_STUN_URLS", "")
+if any(not url.startswith("stun:") for url in P2P_STUN_URLS):
+    raise ValueError("P2P_STUN_URLS takes only stun: URLs")

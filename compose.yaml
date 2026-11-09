@@ -12,5 +12,15 @@ services:
       - data:/data
     restart: unless-stopped
 
+  # Optional STUN server for P2P: `docker compose --profile stun up -d`. STUN only; TURN, which would relay media, stays off.
+  stun:
+    image: coturn/coturn:4.18
+    profiles:
+      - stun
+    command: ["-n", "--stun-only", "--no-tls", "--no-tcp", "--listening-port=3478", "--log-file=stdout"]
+    ports:
+      - "3478:3478/udp"
+    restart: unless-stopped
+
 volumes:
   data:

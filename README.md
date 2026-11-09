@@ -55,6 +55,48 @@ EXTENSION_PUBLIC_URL=http://<プレイヤーから届く拡張のホスト>:<ポ
 | `GET /video` | プレイヤー向けのHLS。`exp` と `sig` を確かめる |
 | `GET /stream` | プレイヤー向けの音声（このAPIの `/stream` と同じ形式）。`exp` と `sig` を確かめる |
 
+## P2P通信
+
+プレイヤー同士をWebRTCで直接つなぐためのシグナリングです。APIはオファー・アンサー・ICE候補を中継するだけで、映像・音声・データは通しません。TURN（中継サーバー）には対応していないため、双方のNATが直接接続を許さない環境ではつながりません。
+
+1. `.env` に長いランダムな `P2P_SERVER_TOKEN` を設定します（例: `openssl rand -hex 32`）。同じ値をMinecraftサーバーのMod側の、サーバーだけが読む設定に入れてください。プレイヤーには渡しません
+2. インターネット越しに使う場合は `P2P_STUN_URLS` にSTUNサーバーを設定します。同梱のSTUN専用coturnを使う場合は `docker compose --profile stun up -d` で起動し、UDP 3478を開けて `P2P_STUN_URLS=stun:<公開ホスト>:3478` とします。LAN内だけなら空で構いません
+3. 外部に公開する場合はリバースプロキシでHTTPS/WSSにしてください。パス接頭辞（例: `https://example.com/cms`）付きでも動きます
+
+帯域はプレイヤーが各自のPCで実行するOoklaのSpeedtest CLIの測定値をもとに決まります。APIは測定しません。
+
+### プロトコル（バージョン1）
+
+| エンドポイント | 認証 | 内容 |
+|---|---|---|
+| `GET /p2p/config` | なし | `{"protocol": 1, "enabled", "stun_urls"}` |
+| `POST /p2p/sessions` | サーバートークン | `{"host_id": UUID, "upload_bps", "download_bps"}` でルームを作り、ホストのチケットを返す |
+| `POST /p2p/sessions/{id}/peers` | サーバートークン | `{"peer_id": UUID, "upload_bps", "download_bps"}` で視聴者のチケットを返す。同じプレイヤーの重複とホスト自身は `409` |
+| `DELETE /p2p/sessions/{id}` | サーバートークン | ルームを閉じ、全員を切断してチケットを無効にする |
+| `DELETE /p2p/sessions/{id}/peers/{peer_id}` | サーバートークン | その視聴者を切断。ホストを指定するとルームを閉じる |
+| `WS /p2p/sessions/{id}/signal` | チケット | シグナリング |
+
+サーバートークンとチケットはどちらも `Authorization: Bearer <トークン>` ヘッダーで渡します（クエリ文字列は不可）。DELETEは対象がなくても `204` を返します。bpsは1以上100 Gbps以下の整数です。チケットは `{"protocol": 1, "session_id", "peer_id", "host_id", "role": "host"|"viewer", "token", "stun_urls"}` です。
+
+WebSocketでは、参加者が変わるたびに `{"type": "peers", "host_id", "peers": [{"peer_id", "role", "upload_bps", "download_bps"}], "budget_bps"}` が届きます。ホストには接続中の全員、視聴者にはホストだけが見えます。`budget_bps` は視聴者1人あたりに送ってよい量で、`floor(min(0.65 × ホストの上り ÷ 接続中の視聴者数, 0.65 × 最も遅い視聴者の下り))`、視聴者がいなければ `0` です。
+
+クライアントが送るのは次の3種類だけで、これ以外のフィールドは拒否されます。転送時は `to` が送信者の `from` に置き換わります。
+
+* `{"type": "offer", "to", "sdp"}` ホストから視聴者へ
+* `{"type": "answer", "to", "sdp"}` 視聴者からホストへ
+* `{"type": "ice", "to", "candidate", "sdp_mid", "sdp_mline_index"}` ホストと視聴者の間
+
+問題があると `{"type": "error", "message"}`、ルームが閉じると `{"type": "closed", "message"}` が届きます。
+
+### 制限
+
+* ルームはAPIプロセスのメモリ上にあるため、APIは1プロセス・1台で動かしてください（複数ワーカーや複数台への振り分けは不可）。APIを再起動するとルームは消え、ホストと視聴者はやり直しが必要
+* ルームは最大64、1ルームの視聴者は最大16
+* チケットは120秒以内にWebSocketで使わないと無効。ホストが接続しなければルームごと閉じる
+* 1人1接続。ホストが切断するとルームが閉じ、視聴者が切断すると退出扱い
+* メッセージは64 KiB、SDPは48 KiB、ICE候補は2048文字まで。バイナリは不可。`relay` 候補は拒否
+* 1接続あたり10秒に64件・128 KiBまで（ホストは接続中の視聴者数倍）。さらに相手1人へ転送できるのも10秒に64件・128 KiBまで。超えるか受信が詰まると切断
+
 ## 設定
 
 | 名前 | 既定値 | 内容 |
@@ -69,6 +111,8 @@ EXTENSION_PUBLIC_URL=http://<プレイヤーから届く拡張のホスト>:<ポ
 | `EXTENSION_URL` | なし | [拡張](#拡張API)のURL |
 | `EXTENSION_TOKEN` | なし | 拡張との認証用トークン |
 | `EXTENSION_PUBLIC_URL` | なし | プレイヤーから届く拡張のURL |
+| `P2P_SERVER_TOKEN` | なし | [P2P通信](#p2p通信)用にMinecraftサーバーとだけ共有する秘密。空なら無効 |
+| `P2P_STUN_URLS` | なし | プレイヤーに渡すSTUNサーバー（`stun:` のみ、カンマ区切り） |
 
 ## 注意点
 
