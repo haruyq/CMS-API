@@ -53,6 +53,21 @@ def test_budget():
     assert p2p.budget_bps(10_000_000, [4_000_000]) == 2_600_000
     assert p2p.budget_bps(10_000_000, [50_000_000, 50_000_000]) == 3_250_000
     assert p2p.budget_bps(100_000_000_000, [3]) == 1
+    assert p2p.budget_bps(None, [4_000_000]) == 0
+    assert p2p.budget_bps(10_000_000, [4_000_000, None]) == 0
+
+
+def test_rooms_without_rates(client):
+    """Current clients measure their connections themselves and report no rates."""
+    host_ticket = client.post("/p2p/sessions", headers=SERVER, json={"host_id": HOST}).json()
+    viewer_ticket = client.post(f"/p2p/sessions/{host_ticket['session_id']}/peers", headers=SERVER,
+                                json={"peer_id": VIEWER}).json()
+    with connect(client, host_ticket) as host:
+        assert host.receive_json()["peers"] == [{"peer_id": HOST, "role": "host"}]
+        with connect(client, viewer_ticket) as viewer:
+            joined = host.receive_json()
+            assert joined["peers"] == [{"peer_id": HOST, "role": "host"}, {"peer_id": VIEWER, "role": "viewer"}]
+            assert joined["budget_bps"] == 0 and viewer.receive_json()["budget_bps"] == 0
 
 
 def test_config_and_server_auth(client, monkeypatch):

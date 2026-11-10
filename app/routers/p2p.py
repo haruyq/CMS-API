@@ -2,7 +2,8 @@
 
 The Minecraft server opens a room with P2P_SERVER_TOKEN and gets one ticket per player; players then exchange WebRTC
 offers, answers and ICE candidates over /signal. Nothing else passes through: no TURN, host-viewer edges only, direct
-candidates only, and small rate-limited messages, so this API never carries media.
+candidates only, and small rate-limited messages, so this API never carries media. Clients measure each connection
+themselves; bit rates are only taken from CMS 1.2.3 and earlier, which still pace at budget_bps.
 """
 
 import asyncio
@@ -47,23 +48,23 @@ Bps = Annotated[int, Field(strict=True, gt=0, le=MAX_BPS)]
 class _HostRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     host_id: uuid.UUID
-    upload_bps: Bps
-    download_bps: Bps
+    upload_bps: Bps | None = None
+    download_bps: Bps | None = None
 
 
 class _ViewerRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     peer_id: uuid.UUID
-    upload_bps: Bps
-    download_bps: Bps
+    upload_bps: Bps | None = None
+    download_bps: Bps | None = None
 
 
 @dataclass(eq=False)
 class _Peer:
     id: str
     role: str
-    upload_bps: int
-    download_bps: int
+    upload_bps: int | None
+    download_bps: int | None
     token: str = field(default_factory=lambda: secrets.token_urlsafe(32))
     socket: WebSocket | None = None
     outbox: asyncio.Queue = field(default_factory=lambda: asyncio.Queue(OUTBOX_MESSAGES))
@@ -82,9 +83,12 @@ class _Room:
 _rooms: dict[str, _Room] = {}
 
 
-def budget_bps(host_upload_bps: int, viewer_download_bps: list[int]) -> int:
-    """Payload each connected viewer may receive: 65% of the host's upload shared out, capped by the slowest viewer."""
-    if not viewer_download_bps:
+def budget_bps(host_upload_bps: int | None, viewer_download_bps: list[int | None]) -> int:
+    """Payload each connected viewer may receive: 65% of the host's upload shared out, capped by the slowest viewer.
+
+    0 without viewers, or when anyone did not report a rate (clients that measure their connections themselves).
+    """
+    if not viewer_download_bps or host_upload_bps is None or None in viewer_download_bps:
         return 0
     # 0.65 is 13/20; integer division floors exactly.
     return min(host_upload_bps * 13 // (20 * len(viewer_download_bps)), min(viewer_download_bps) * 13 // 20)
@@ -133,7 +137,8 @@ def _error(message: str) -> dict:
 
 
 def _entry(peer: _Peer) -> dict:
-    return {"peer_id": peer.id, "role": peer.role, "upload_bps": peer.upload_bps, "download_bps": peer.download_bps}
+    rates = {"upload_bps": peer.upload_bps, "download_bps": peer.download_bps}
+    return {"peer_id": peer.id, "role": peer.role} | {key: value for key, value in rates.items() if value is not None}
 
 
 def _broadcast(room: _Room) -> None:

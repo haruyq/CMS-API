@@ -63,22 +63,22 @@ EXTENSION_PUBLIC_URL=http://<プレイヤーから届く拡張のホスト>:<ポ
 2. インターネット越しに使う場合は `P2P_STUN_URLS` にSTUNサーバーを設定します。同梱のSTUN専用coturnを使う場合は `docker compose --profile stun up -d` で起動し、UDP 3478を開けて `P2P_STUN_URLS=stun:<公開ホスト>:3478` とします。LAN内だけなら空で構いません
 3. 外部に公開する場合はリバースプロキシでHTTPS/WSSにしてください。パス接頭辞（例: `https://example.com/cms`）付きでも動きます
 
-帯域はプレイヤーが各自のPCで実行するOoklaのSpeedtest CLIの測定値をもとに決まります。APIは測定しません。
+帯域は、ホストが視聴者とつながった直後に、その接続で短いデータを送って測ります。再生中も実際の転送速度に合わせて調整します。APIは測定しません。
 
 ### プロトコル（バージョン1）
 
 | エンドポイント | 認証 | 内容 |
 |---|---|---|
 | `GET /p2p/config` | なし | `{"protocol": 1, "enabled", "stun_urls"}` |
-| `POST /p2p/sessions` | サーバートークン | `{"host_id": UUID, "upload_bps", "download_bps"}` でルームを作り、ホストのチケットを返す |
-| `POST /p2p/sessions/{id}/peers` | サーバートークン | `{"peer_id": UUID, "upload_bps", "download_bps"}` で視聴者のチケットを返す。同じプレイヤーの重複とホスト自身は `409` |
+| `POST /p2p/sessions` | サーバートークン | `{"host_id": UUID}` でルームを作り、ホストのチケットを返す |
+| `POST /p2p/sessions/{id}/peers` | サーバートークン | `{"peer_id": UUID}` で視聴者のチケットを返す。同じプレイヤーの重複とホスト自身は `409` |
 | `DELETE /p2p/sessions/{id}` | サーバートークン | ルームを閉じ、全員を切断してチケットを無効にする |
 | `DELETE /p2p/sessions/{id}/peers/{peer_id}` | サーバートークン | その視聴者を切断。ホストを指定するとルームを閉じる |
 | `WS /p2p/sessions/{id}/signal` | チケット | シグナリング |
 
-サーバートークンとチケットはどちらも `Authorization: Bearer <トークン>` ヘッダーで渡します（クエリ文字列は不可）。DELETEは対象がなくても `204` を返します。bpsは1以上100 Gbps以下の整数です。チケットは `{"protocol": 1, "session_id", "peer_id", "host_id", "role": "host"|"viewer", "token", "stun_urls"}` です。
+サーバートークンとチケットはどちらも `Authorization: Bearer <トークン>` ヘッダーで渡します（クエリ文字列は不可）。DELETEは対象がなくても `204` を返します。CMS 1.2.3以前は`upload_bps`と`download_bps`（1以上100 Gbps以下の整数）も送ります。どちらも省略できます。チケットは `{"protocol": 1, "session_id", "peer_id", "host_id", "role": "host"|"viewer", "token", "stun_urls"}` です。
 
-WebSocketでは、参加者が変わるたびに `{"type": "peers", "host_id", "peers": [{"peer_id", "role", "upload_bps", "download_bps"}], "budget_bps"}` が届きます。ホストには接続中の全員、視聴者にはホストだけが見えます。`budget_bps` は視聴者1人あたりに送ってよい量で、`floor(min(0.65 × ホストの上り ÷ 接続中の視聴者数, 0.65 × 最も遅い視聴者の下り))`、視聴者がいなければ `0` です。
+WebSocketでは、参加者が変わるたびに `{"type": "peers", "host_id", "peers": [{"peer_id", "role"}], "budget_bps"}` が届きます。ホストには接続中の全員、視聴者にはホストだけが見えます。`budget_bps` はCMS 1.2.3以前のための値です。ホストと接続中の全視聴者がbpsを送った場合だけ `floor(min(0.65 × ホストの上り ÷ 接続中の視聴者数, 0.65 × 最も遅い視聴者の下り))` になり、それ以外は `0` です。bpsを送った参加者は `peers` の各要素にも `upload_bps` と `download_bps` が付きます。
 
 クライアントが送るのは次の3種類だけで、これ以外のフィールドは拒否されます。転送時は `to` が送信者の `from` に置き換わります。
 
