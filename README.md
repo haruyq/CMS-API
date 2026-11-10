@@ -59,7 +59,7 @@ EXTENSION_PUBLIC_URL=http://<プレイヤーから届く拡張のホスト>:<ポ
 
 プレイヤー同士をWebRTCで直接つなぐためのシグナリングです。APIはオファー・アンサー・ICE候補を中継するだけで、映像・音声・データは通しません。TURN（中継サーバー）には対応していないため、双方のNATが直接接続を許さない環境ではつながりません。
 
-1. `.env` に長いランダムな `P2P_SERVER_TOKEN` を設定します（例: `openssl rand -hex 32`）。同じ値をMinecraftサーバーのMod側の、サーバーだけが読む設定に入れてください。プレイヤーには渡しません
+1. `.env` に長いランダムな `P2P_SERVER_TOKEN` を設定します（例: `openssl rand -hex 32`）。同じ値をMinecraftサーバーの `config/cms-server.toml` の `p2pServerToken`（または環境変数 `CMS_P2P_SERVER_TOKEN`）に入れてください。このファイルのほかの設定はプレイヤーに送られますが、`p2pServerToken` だけは送られません。トークンをプレイヤーに渡さないでください
 2. インターネット越しに使う場合は `P2P_STUN_URLS` にSTUNサーバーを設定します。同梱のSTUN専用coturnを使う場合は `docker compose --profile stun up -d` で起動し、UDP 3478を開けて `P2P_STUN_URLS=stun:<公開ホスト>:3478` とします。LAN内だけなら空で構いません
 3. 外部に公開する場合はリバースプロキシでHTTPS/WSSにしてください。パス接頭辞（例: `https://example.com/cms`）付きでも動きます
 
