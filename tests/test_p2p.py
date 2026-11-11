@@ -94,7 +94,7 @@ def test_tickets(client):
     assert join(client, {"session_id": "missing"}).status_code == 404
 
 
-def test_signaling(client):
+def test_signaling(client, monkeypatch):
     host_ticket = open_room(client)
     viewer_ticket = join(client, host_ticket).json()
     with connect(client, host_ticket) as host:
@@ -134,6 +134,8 @@ def test_signaling(client):
             assert host.receive_json()["message"] == "The host does not answer"
             host.send_json(ice | {"to": OTHER})
             assert host.receive_json()["message"] == "That peer is not connected"
+            monkeypatch.setattr(p2p, "TICKET_SECONDS", 0.1)
+        # The viewer's socket is gone: it leaves once its ticket has waited for another in vain.
         left = host.receive_json()
         assert [peer["peer_id"] for peer in left["peers"]] == [HOST] and left["budget_bps"] == 0
 
@@ -152,14 +154,43 @@ def test_socket_auth(client):
     with pytest.raises(WebSocketDisconnect):
         with connect(client, other_room, viewer_ticket["token"]):
             pass
+
+
+def test_newest_socket_replaces_the_last(client):
+    """A client that lost its socket opens another, often before this API can tell the lost one is dead."""
+    host_ticket = open_room(client)
+    with connect(client, host_ticket) as stale:
+        stale.receive_json()
+        with connect(client, host_ticket) as host:
+            assert host.receive_json()["type"] == "peers"
+            with pytest.raises(WebSocketDisconnect):
+                stale.receive_json()
+            assert join(client, host_ticket).status_code == 200
+
+
+def test_lost_signaling_keeps_the_room(client, monkeypatch):
+    """A proxy cut the host's socket: it comes back with its ticket, to the room and the viewer it had."""
+    host_ticket = open_room(client)
+    viewer_ticket = join(client, host_ticket).json()
+
+    def ids(message):
+        return [peer["peer_id"] for peer in message["peers"]]
+
     with connect(client, viewer_ticket) as viewer:
-        viewer.receive_json()
-        with pytest.raises(WebSocketDisconnect):
-            with connect(client, viewer_ticket):
-                pass
+        assert viewer.receive_json()["peers"] == []
+        with connect(client, host_ticket) as host:
+            assert ids(host.receive_json()) == [HOST, VIEWER] and ids(viewer.receive_json()) == [HOST]
+            monkeypatch.setattr(p2p, "TICKET_SECONDS", 0.3)
+        with connect(client, host_ticket) as host:
+            assert ids(host.receive_json()) == [HOST, VIEWER] and ids(viewer.receive_json()) == [HOST]
+            # Long past the wait its lost socket started: that ended when this one opened.
+            time.sleep(0.6)
+            host.send_json({"type": "offer", "to": VIEWER, "sdp": SDP})
+            assert viewer.receive_json() == {"type": "offer", "from": HOST, "sdp": SDP}
+            assert join(client, host_ticket, OTHER).status_code == 200
 
 
-def test_host_leaving_closes_room(client):
+def test_host_staying_away_closes_room(client, monkeypatch):
     host_ticket = open_room(client)
     viewer_ticket = join(client, host_ticket).json()
     with connect(client, viewer_ticket) as viewer:
@@ -167,6 +198,7 @@ def test_host_leaving_closes_room(client):
         with connect(client, host_ticket) as host:
             host.receive_json()
             assert viewer.receive_json()["peers"][0]["peer_id"] == HOST
+            monkeypatch.setattr(p2p, "TICKET_SECONDS", 0.1)
         assert viewer.receive_json() == {"type": "closed", "message": "The host left"}
         with pytest.raises(WebSocketDisconnect):
             viewer.receive_json()
@@ -244,7 +276,8 @@ def test_revoked_peer_forwards_nothing(revoke):
                         room.viewers[VIEWER] = p2p._Peer(VIEWER, "viewer", 1, 1)
                 return answer
 
-        await p2p._receive(Socket(), room, viewer)
+        viewer.socket = Socket()
+        await p2p._receive(viewer.socket, room, viewer)
         while not room.host.outbox.empty():
             assert json.loads(room.host.outbox.get_nowait())["type"] == "peers"
 

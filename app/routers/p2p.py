@@ -21,7 +21,9 @@ from .. import config
 
 MAX_ROOMS = 64
 MAX_VIEWERS = 16
-# Seconds a ticket waits for its WebSocket. An unused host ticket closes the room; an unused viewer ticket is revoked.
+# Seconds a ticket waits for its WebSocket, at first and again whenever it loses one: signaling drops (a proxy in
+# between cuts it) while the direct connections it set up carry on. A host that stays away closes the room; a viewer
+# that does is removed.
 TICKET_SECONDS = 120
 MAX_MESSAGE_BYTES = 64 * 1024
 MAX_SDP_BYTES = 48 * 1024
@@ -67,6 +69,10 @@ class _Peer:
     download_bps: int | None
     token: str = field(default_factory=lambda: secrets.token_urlsafe(32))
     socket: WebSocket | None = None
+    # Whether its WebSocket ever opened: it stays in `peers` while it waits for the next, so the host keeps its viewers.
+    joined: bool = False
+    expiry: asyncio.TimerHandle | None = None
+    replaced: asyncio.Event = field(default_factory=asyncio.Event)
     outbox: asyncio.Queue = field(default_factory=lambda: asyncio.Queue(OUTBOX_MESSAGES))
     gone: asyncio.Event = field(default_factory=asyncio.Event)
     farewell: dict | None = None
@@ -115,8 +121,8 @@ def _member(room: _Room, peer: _Peer) -> bool:
     return _live(room) and (peer is room.host or room.viewers.get(peer.id) is peer)
 
 
-def _connected(room: _Room) -> list[_Peer]:
-    return [viewer for viewer in room.viewers.values() if viewer.socket is not None]
+def _joined(room: _Room) -> list[_Peer]:
+    return [viewer for viewer in room.viewers.values() if viewer.joined]
 
 
 def _send(peer: _Peer, message: dict) -> None:
@@ -142,15 +148,16 @@ def _entry(peer: _Peer) -> dict:
 
 
 def _broadcast(room: _Room) -> None:
-    viewers = _connected(room)
+    viewers = _joined(room)
     budget = budget_bps(room.host.upload_bps, [viewer.download_bps for viewer in viewers])
-    host = [_entry(room.host)] if room.host.socket is not None else []
-    if host:
+    host = [_entry(room.host)] if room.host.joined else []
+    if room.host.socket is not None:
         _send(room.host, {"type": "peers", "host_id": room.host.id, "peers": host + [_entry(v) for v in viewers],
                           "budget_bps": budget})
     # Viewers only learn of the host: they never signal each other.
     for viewer in viewers:
-        _send(viewer, {"type": "peers", "host_id": room.host.id, "peers": host, "budget_bps": budget})
+        if viewer.socket is not None:
+            _send(viewer, {"type": "peers", "host_id": room.host.id, "peers": host, "budget_bps": budget})
 
 
 def _close_room(room: _Room, message: str) -> None:
@@ -164,20 +171,27 @@ def _remove_viewer(room: _Room, peer_id: str, message: str) -> None:
     viewer = room.viewers.pop(peer_id, None)
     if viewer is not None:
         _kick(viewer, {"type": "closed", "message": message})
-        if viewer.socket is not None:
+        if viewer.joined:
             _broadcast(room)
 
 
 def _expire(room: _Room, peer: _Peer) -> None:
-    if peer.socket is None and _live(room):
+    if peer.socket is None and _member(room, peer):
         if peer is room.host:
-            _close_room(room, "The host did not connect in time")
-        elif room.viewers.get(peer.id) is peer:
-            del room.viewers[peer.id]
+            _close_room(room, "The host left" if peer.joined else "The host did not connect in time")
+        else:
+            _remove_viewer(room, peer.id, "You left the session")
+
+
+def _wait(room: _Room, peer: _Peer) -> None:
+    """Gives `peer` TICKET_SECONDS from now to open a WebSocket."""
+    if peer.expiry is not None:
+        peer.expiry.cancel()
+    peer.expiry = asyncio.get_running_loop().call_later(TICKET_SECONDS, _expire, room, peer)
 
 
 def _issue(room: _Room, peer: _Peer, response: Response) -> dict:
-    asyncio.get_running_loop().call_later(TICKET_SECONDS, _expire, room, peer)
+    _wait(room, peer)
     return _ticket(room, peer, response)
 
 
@@ -250,7 +264,8 @@ async def _receive(websocket: WebSocket, room: _Room, peer: _Peer) -> None:
     while True:
         message = await websocket.receive()
         # Removed, replaced or its room closed while waiting: nothing more of it goes anywhere.
-        if message["type"] == "websocket.disconnect" or peer.gone.is_set() or not _member(room, peer):
+        if (message["type"] == "websocket.disconnect" or peer.gone.is_set() or not _member(room, peer)
+                or peer.socket is not websocket):
             return
         text = message.get("text")
         if text is None:
@@ -261,7 +276,7 @@ async def _receive(websocket: WebSocket, room: _Room, peer: _Peer) -> None:
         if time.monotonic() - window > RATE_WINDOW_SECONDS:
             window, count, size, edges = time.monotonic(), 0, 0, {}
         count, size = count + 1, size + length
-        scale = max(1, len(_connected(room))) if peer is room.host else 1
+        scale = max(1, len(_joined(room))) if peer is room.host else 1
         if count > RATE_MESSAGES * scale or size > RATE_BYTES * scale:
             return _kick(peer, _error("Too many signaling messages"), 1008)
         try:
@@ -343,29 +358,44 @@ async def signal(websocket: WebSocket, session_id: str) -> None:
     room = _rooms.get(session_id)
     peer = _authenticate(room, websocket.headers.get("authorization", ""))
     # Refused before accepting, which the client sees as HTTP 403.
-    if peer is None or peer.socket is not None:
+    if peer is None:
         await websocket.close(1008)
         return
-    peer.socket = websocket
+    # A ticket's newest socket is its only one: a client opens another once it lost the last, often before this API
+    # can tell that one is dead. What the lost one never took is dropped with it.
+    peer.replaced.set()
+    replaced = peer.replaced = asyncio.Event()
+    peer.socket, peer.joined, peer.outbox = websocket, True, asyncio.Queue(OUTBOX_MESSAGES)
+    if peer.expiry is not None:
+        peer.expiry.cancel()
     tasks = []
     try:
         await websocket.accept()
         tasks = [asyncio.create_task(_pump(websocket, peer.outbox)),
-                 asyncio.create_task(_receive(websocket, room, peer)), asyncio.create_task(peer.gone.wait())]
+                 asyncio.create_task(_receive(websocket, room, peer)), asyncio.create_task(peer.gone.wait()),
+                 asyncio.create_task(replaced.wait())]
         _broadcast(room)
         await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
     finally:
         # Membership changes before any await: a cancelled handler must still leave the room.
-        if peer is room.host:
-            _close_room(room, "The host left")
-        elif _member(room, peer):
-            _remove_viewer(room, peer.id, "You left the session")
+        latest = peer.socket is websocket
+        if latest:
+            peer.socket = None
+            if not peer.gone.is_set():
+                # Lost, not left: the server says when a player leaves (DELETE); until then its ticket waits again.
+                _wait(room, peer)
+            elif peer is room.host:
+                _close_room(room, "The host left")
+            elif _member(room, peer):
+                _remove_viewer(room, peer.id, "You left the session")
         for task in tasks:
             task.cancel()
-        try:
-            await asyncio.gather(*tasks, return_exceptions=True)
-            if peer.farewell is not None:
-                await asyncio.wait_for(websocket.send_text(json.dumps(peer.farewell)), 2)
-            await asyncio.wait_for(websocket.close(peer.close_code), 2)
-        except Exception:
-            pass  # The client is already gone.
+        # A lost socket has nobody left to tell.
+        if not latest or peer.gone.is_set():
+            try:
+                await asyncio.gather(*tasks, return_exceptions=True)
+                if latest and peer.farewell is not None:
+                    await asyncio.wait_for(websocket.send_text(json.dumps(peer.farewell)), 2)
+                await asyncio.wait_for(websocket.close(peer.close_code if latest else 1000), 2)
+            except Exception:
+                pass  # The client is already gone.
