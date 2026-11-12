@@ -16,6 +16,8 @@ COOKIE_FILE = Path(os.getenv("COOKIE_FILE", "/data/cookies.txt"))
 # Where clients' playback diagnostics (POST /diagnostics) are kept, and the size (MB) past which new ones are refused.
 DIAGNOSTICS_FILE = Path(os.getenv("DIAGNOSTICS_FILE", "/data/diagnostics.jsonl"))
 DIAGNOSTICS_MAX_MB = int(os.getenv("DIAGNOSTICS_MAX_MB", "200"))
+# Where links' titles (see /title) are kept.
+TITLES_FILE = Path(os.getenv("TITLES_FILE", "/data/titles.json"))
 COOKIE_REFRESH_MINUTES = int(os.getenv("COOKIE_REFRESH_MINUTES", "60"))
 # Concurrent ffmpeg processes; each in-game listener holds one while streaming.
 MAX_STREAMS = int(os.getenv("MAX_STREAMS", "32"))

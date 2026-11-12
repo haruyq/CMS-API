@@ -1,14 +1,15 @@
 """The endpoints the CMS mod calls (spec: the mod's API.md)."""
 
+import asyncio
 import logging
 
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Body, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse, Response, StreamingResponse
 from starlette.background import BackgroundTask
 
-from .. import extension, tver, providers
+from .. import extension, titles, tver, providers
 from .provider_media import open_video
 from ..audio import Busy, SourceError, is_allowed
 from ..video import SESSION_ID
@@ -93,7 +94,36 @@ async def info(request: Request, url: str) -> dict[str, float | str | None]:
     except SourceError as error:
         log.warning("Could not resolve %s: %s", url, error)
         raise HTTPException(502, str(error))
+    titles.put(url, source.title)
     return {"duration": source.duration, "title": source.title}
+
+
+# How many links /title looks up at once; a disc's whole playlist may be asked about together.
+_lookups = asyncio.Semaphore(4)
+
+
+@router.get("/title")
+async def title(request: Request, url: str) -> dict[str, str | None]:
+    """The link's title: one kept from before, else looked up and kept. Null when it has none, or can't be played."""
+    url = _check(url)
+    known = titles.get(url)
+    if known is None:
+        async with _lookups:
+            try:
+                known = (await request.app.state.resolver.resolve(url)).title
+            except SourceError as error:
+                log.warning("Could not resolve %s for its title: %s", url, error)
+        titles.put(url, known)
+    return {"title": known}
+
+
+@router.post("/title", status_code=204)
+async def found_title(url: str, title: str = Body(embed=True, max_length=10_000)) -> Response:
+    """A player's yt-dlp found the link's title: kept for the others, unless the API already keeps one."""
+    url = _check(url)
+    if titles.get(url) is None:
+        titles.put(url, title)
+    return Response(status_code=204)
 
 
 _HLS = "application/vnd.apple.mpegurl"

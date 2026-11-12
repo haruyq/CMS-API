@@ -109,6 +109,7 @@ WebSocketでは、参加者が変わるたびに `{"type": "peers", "host_id", "
 | `RESOLVE_CACHE_SECONDS` | `1800` | 解決したURLを使い回す秒数 |
 | `YTDLP_UPDATE_HOURS` | `24`（Compose） | yt-dlpを更新する間隔（時間）。`0` で無効 |
 | `COOKIE_FILE` | `/data/cookies.txt` | Cookie の保存先 |
+| `TITLES_FILE` | `/data/titles.json` | リンクのタイトル（`/title`）の保存先 |
 | `EXTENSION_URL` | なし | [拡張](#拡張API)のURL |
 | `EXTENSION_TOKEN` | なし | 拡張との認証用トークン |
 | `EXTENSION_PUBLIC_URL` | なし | プレイヤーから届く拡張のURL |
@@ -132,7 +133,7 @@ WebSocketでは、参加者が変わるたびに `{"type": "peers", "host_id", "
 
 ### 3. 運用・セキュリティ上の注意点
 
-* **セキュリティ（認証なし）**: `/stream` と `/info` には認証が存在しないため、公開時はファイアウォール等でMinecraftサーバーおよびプレイヤーIP以外からのアクセスを遮断してください。
+* **セキュリティ（認証なし）**: `/stream`、`/info`、`/title` には認証が存在しないため、公開時はファイアウォール等でMinecraftサーバーおよびプレイヤーIP以外からのアクセスを遮断してください。
 * **プロセス構成**: キャッシュやCookieをメモリ共有するため、1プロセスで動作させる必要があります。
 * **アクセス制限**: 許可されていないホストへのURLリクエストは `403` になります。
 
