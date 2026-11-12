@@ -264,7 +264,9 @@ def _extract(url: str, cookies, profile="native_mp4") -> dict:
                         caption["format"] = "bilibili_json"
                     captions.append(caption)
             result = _hls(_response(info.get("title"), info.get("duration"), info.get("is_live"), video, audio, captions, profile=profile))
-            result["available_at"] = _number(info.get("available_at"))
+            # A video+audio pick (YouTube's usual) carries YouTube's pre-roll ad wait only on its formats, not on
+            # info: read as 0, players opened the media before it was served and stayed silent until reinserted.
+            result["available_at"] = max(_number(f.get("available_at")) for f in [info, *selected])
             return result
     except DownloadError:
         # The extractor's full exception may include account or signed URL data.
