@@ -13,6 +13,7 @@ import tempfile
 import threading
 import time
 import urllib.request
+import weakref
 from http.cookiejar import Cookie, CookieJar
 from pathlib import Path
 
@@ -64,6 +65,8 @@ class CookieStore:
         self.path = path
         self._jar = YoutubeDLCookieJar()
         self._lock = threading.Lock()
+        # What each run's jar was given, so merge_from keeps only what that run changed.
+        self._given: weakref.WeakKeyDictionary[CookieJar, dict] = weakref.WeakKeyDictionary()
         self.logged_in: bool | None = None
         self.last_refresh: float | None = None
 
@@ -77,14 +80,17 @@ class CookieStore:
 
     def copy_into(self, jar: CookieJar) -> None:
         with self._lock:
+            self._given[jar] = {(c.domain, c.path, c.name): c.value for c in self._jar}
             for cookie in self._jar:
                 jar.set_cookie(cookie)
 
     def merge_from(self, jar: CookieJar) -> None:
-        """Keeps the rotated values a yt-dlp run received."""
+        """Keeps the rotated values a yt-dlp run received. Only those: a run that started before another one's
+        rotation still holds the old value, and writing that back would undo it (and sign the account out)."""
         with self._lock:
+            given = self._given.pop(jar, {})
             for cookie in jar:
-                if _is_login_cookie(cookie):
+                if _is_login_cookie(cookie) and given.get((cookie.domain, cookie.path, cookie.name)) != cookie.value:
                     self._jar.set_cookie(cookie)
             self._save()
 
