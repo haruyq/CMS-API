@@ -29,6 +29,8 @@ CHANNEL_FILTERS = {
     "right": "aformat=channel_layouts=stereo,pan=mono|c0=c1",
 }
 PCM_BYTES_PER_SECOND = 48_000 * 2
+# Network inputs only; keeps a crafted playlist from reading local files. ffprobe needs it as much as ffmpeg.
+PROTOCOLS = "http,https,tls,tcp,crypto,hls,data"
 # An ffmpeg error this close to the known end of the track is about the tail (trailing packets, the input
 # connection dropping after the last byte), not lost audio, so the stream still ends normally.
 END_TOLERANCE_SECONDS = 3.0
@@ -169,7 +171,7 @@ def _probe_duration(media_url: str) -> float | None:
     """Direct files (e.g. Discord attachments) carry no duration in yt-dlp's info; ask ffprobe."""
     try:
         result = subprocess.run(
-            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json", media_url],
+            ["ffprobe", "-v", "error", "-protocol_whitelist", PROTOCOLS, "-show_entries", "format=duration", "-of", "json", media_url],
             capture_output=True, timeout=15, check=True,
         )
         return float(json.loads(result.stdout)["format"]["duration"])
@@ -227,7 +229,11 @@ class Streamer:
                 return _nothing()
             raise SourceError(error[-500:] or "ffmpeg produced no audio")
         expected = None if source.duration is None else max(source.duration - start, 0)
-        return self._pipe(process, first, expected, ogg)
+        pipe = self._pipe(process, first, expected, ogg)
+        # Start it now, so its `finally` (kill ffmpeg, free the slot) runs on aclose(); closing a generator that never
+        # started runs nothing, and a client gone before the first read would keep the slot for good.
+        await pipe.__anext__()
+        return _Primed(first, pipe)
 
     async def _pipe(self, process: asyncio.subprocess.Process, first: bytes,
                     expected_seconds: float | None = None, ogg: bool = False) -> AsyncIterator[bytes]:
@@ -259,6 +265,25 @@ class Streamer:
                 process.kill()
             self._release()
             await process.wait()
+
+
+class _Primed:
+    """`pipe`, already started and suspended after yielding `first`, which this hands out again as its first chunk."""
+
+    def __init__(self, first: bytes, pipe: AsyncIterator[bytes]):
+        self._first, self._pipe = first, pipe
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self) -> bytes:
+        if self._first is not None:
+            first, self._first = self._first, None
+            return first
+        return await self._pipe.__anext__()
+
+    async def aclose(self) -> None:
+        await self._pipe.aclose()
 
 
 async def _nothing() -> AsyncIterator[bytes]:
@@ -298,8 +323,7 @@ def _ffmpeg_args(source: Source, start: float, channel: str | None = None, ogg: 
         filters.append("asetpts=N/SR/TB")
     return [
         "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
-        # Network inputs only; keeps a crafted playlist from reading local files.
-        "-protocol_whitelist", "http,https,tls,tcp,crypto,hls,data",
+        "-protocol_whitelist", PROTOCOLS,
         # The client reads at playback speed, so the input connection idles and can be dropped; reconnect.
         "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_on_network_error", "1", "-reconnect_delay_max", "5",
         *(["-headers", headers] if headers else []),
