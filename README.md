@@ -105,7 +105,6 @@ WebSocketでは、参加者が変わるたびに `{"type": "peers", "host_id", "
 
 | 名前 | 既定値 | 内容 |
 |---|---|---|
-| `ADMIN_TOKEN` | なし | 診断情報を返す`GET /diagnostics`のパスワード |
 | `ALLOWED_HOSTS` | `youtube.com,youtu.be,discordapp.com,discordapp.net,tver.jp,cctv.com,cntv.cn,cntv.com,bilibili.com,b23.tv,iwara.tv` | 取得可能にするホスト。Mod側の `allowedHosts` と統一してください |
 | `COOKIE_REFRESH_MINUTES` | `60` | Cookieを更新する間隔（分） |
 | `MAX_STREAMS` | `32` | 同時に配信するストリーム数。超過時は `503` を返す |

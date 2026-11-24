@@ -10,7 +10,7 @@ from . import config, extension
 from .audio import Resolver, Streamer
 from .cookies import CookieStore, refresh_forever
 from .native import NativeResolver
-from .routers import diagnostics, native, media, provider_media, p2p
+from .routers import native, media, provider_media, p2p
 from .updater import update_forever
 from .video import Video
 
@@ -21,7 +21,6 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 async def lifespan(app: FastAPI):
     cookies = CookieStore(config.COOKIE_FILE)
     cookies.load()
-    app.state.cookies = cookies
     app.state.resolver = Resolver(cookies)
     app.state.native = NativeResolver(cookies)
     app.state.streamer = Streamer(app.state.resolver)
@@ -40,5 +39,4 @@ app = FastAPI(title="Create: Media Systems API", lifespan=lifespan)
 app.include_router(media.router)
 app.include_router(native.router)
 app.include_router(provider_media.router)
-app.include_router(diagnostics.router)
 app.include_router(p2p.router)
