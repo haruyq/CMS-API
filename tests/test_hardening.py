@@ -5,7 +5,7 @@ import sys
 from yt_dlp.cookies import YoutubeDLCookieJar
 
 from app import audio
-from app.cookies import CookieStore, parse
+from app.cookies import CookieStore
 
 
 def test_ffprobe_gets_the_same_protocol_whitelist_as_ffmpeg(monkeypatch):
@@ -17,8 +17,12 @@ def test_ffprobe_gets_the_same_protocol_whitelist_as_ffmpeg(monkeypatch):
 
 
 def _store(tmp_path, value):
-    store = CookieStore(tmp_path / "c.txt")
-    store.replace(parse(f"SID=1; __Secure-1PSIDTS={value}"))
+    path = tmp_path / "c.txt"
+    path.write_text("# Netscape HTTP Cookie File\n" + "".join(
+        f".youtube.com\tTRUE\t/\tTRUE\t1999999999\t{name}\t{v}\n" for name, v in [("SID", "1"), ("__Secure-1PSIDTS", value)]),
+        encoding="utf-8")
+    store = CookieStore(path)
+    store.load()
     return store
 
 

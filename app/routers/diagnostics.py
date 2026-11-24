@@ -2,16 +2,25 @@
 
 import asyncio
 import json
+import secrets
 from datetime import datetime, timezone
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from .. import config
-from .youtube_auth import _admin
 
 _MAX_BODY_BYTES = 512 * 1024
 
 router = APIRouter(prefix="/diagnostics")
+
+
+def _admin(credentials: Annotated[HTTPBasicCredentials, Depends(HTTPBasic())]) -> None:
+    if not config.ADMIN_TOKEN:
+        raise HTTPException(503, "Set ADMIN_TOKEN to read diagnostics")
+    if not secrets.compare_digest(credentials.password.encode(), config.ADMIN_TOKEN.encode()):
+        raise HTTPException(401, "Wrong password", headers={"WWW-Authenticate": "Basic"})
 
 
 @router.post("", status_code=204)

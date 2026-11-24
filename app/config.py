@@ -10,8 +10,9 @@ def _list(name: str, default: str) -> tuple[str, ...]:
 
 # Same default as the mod's allowedHosts; subdomains are allowed too.
 ALLOWED_HOSTS = _list("ALLOWED_HOSTS", "youtube.com,youtu.be,discordapp.com,discordapp.net,tver.jp,cctv.com,cntv.cn,cntv.com,bilibili.com,b23.tv,iwara.tv")
-# Password for the /auth/youtube pages (HTTP Basic, any username). Empty disables them.
+# Password for GET /diagnostics (HTTP Basic, any username). Empty disables it.
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
+# The YouTube cookies.txt the admin places; the API also writes rotated cookies back to it.
 COOKIE_FILE = Path(os.getenv("COOKIE_FILE", "/data/cookies.txt"))
 # Where clients' playback diagnostics (POST /diagnostics) are kept, and the size (MB) past which new ones are refused.
 DIAGNOSTICS_FILE = Path(os.getenv("DIAGNOSTICS_FILE", "/data/diagnostics.jsonl"))

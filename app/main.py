@@ -10,7 +10,7 @@ from . import config, extension
 from .audio import Resolver, Streamer
 from .cookies import CookieStore, refresh_forever
 from .native import NativeResolver
-from .routers import diagnostics, native, media, youtube_auth, provider_media, p2p
+from .routers import diagnostics, native, media, provider_media, p2p
 from .updater import update_forever
 from .video import Video
 
@@ -39,7 +39,6 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Create: Media Systems API", lifespan=lifespan)
 app.include_router(media.router)
 app.include_router(native.router)
-app.include_router(youtube_auth.router)
 app.include_router(provider_media.router)
 app.include_router(diagnostics.router)
 app.include_router(p2p.router)

@@ -18,15 +18,18 @@ docker compose up -d --build
 
 各サイトの利用規約と著作権を守って利用してください。
 
-1. ブラウザで`http://<host>/auth/youtube`を開き、パスワードに`ADMIN_TOKEN`を入力
-2. YouTubeにログインし、cookies.txtを貼り付けて保存
-3. 状態が「ログイン済み」になれば完了
-
-コマンドも利用できます。
+1. ブラウザのプライベートウィンドウでYouTubeにログインし、拡張機能「Get cookies.txt LOCALLY」などでyoutube.comのcookies.txtをNetscape形式で書き出します
+2. プライベートウィンドウをログアウトせずに閉じます。ログアウトするとCookieが無効になります
+3. cookies.txtを`COOKIE_FILE`に置きます。既定の場所はコンテナ内の`/data/cookies.txt`です
 
 ```bash
-curl -u admin:$ADMIN_TOKEN --data-binary @cookies.txt http://localhost:8000/auth/youtube
+docker compose cp cookies.txt api:/data/cookies.txt
+docker compose restart api
 ```
+
+APIは起動時と`COOKIE_REFRESH_MINUTES`ごとにログイン状態を確かめ、結果をログに出力します。`docker compose logs api`に`YouTube cookies are logged in`と出れば完了です。
+
+実行中にファイルを置き換えた場合も、APIは次の再生から新しいCookieを使います。APIは更新されたCookieを同じファイルに書き戻すため、`COOKIE_FILE`を読み取り専用にしないでください。
 
 > [!WARNING]
 > ログインには専用のGoogleアカウントを使用してください。  
@@ -102,13 +105,13 @@ WebSocketでは、参加者が変わるたびに `{"type": "peers", "host_id", "
 
 | 名前 | 既定値 | 内容 |
 |---|---|---|
-| `ADMIN_TOKEN` | なし | ログイン画面のパスワード |
+| `ADMIN_TOKEN` | なし | 診断情報を返す`GET /diagnostics`のパスワード |
 | `ALLOWED_HOSTS` | `youtube.com,youtu.be,discordapp.com,discordapp.net,tver.jp,cctv.com,cntv.cn,cntv.com,bilibili.com,b23.tv,iwara.tv` | 取得可能にするホスト。Mod側の `allowedHosts` と統一してください |
 | `COOKIE_REFRESH_MINUTES` | `60` | Cookieを更新する間隔（分） |
 | `MAX_STREAMS` | `32` | 同時に配信するストリーム数。超過時は `503` を返す |
 | `RESOLVE_CACHE_SECONDS` | `1800` | 解決したURLを使い回す秒数 |
 | `YTDLP_UPDATE_HOURS` | `24`（Compose） | yt-dlpを更新する間隔（時間）。`0` で無効 |
-| `COOKIE_FILE` | `/data/cookies.txt` | Cookie の保存先 |
+| `COOKIE_FILE` | `/data/cookies.txt` | [YouTubeのcookies.txt](#youtubeにログイン)を置く場所 |
 | `TITLES_FILE` | `/data/titles.json` | リンクのタイトル（`/title`）の保存先 |
 | `EXTENSION_URL` | なし | [拡張](#拡張API)のURL |
 | `EXTENSION_TOKEN` | なし | 拡張との認証用トークン |
