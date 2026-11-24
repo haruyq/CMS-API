@@ -11,7 +11,6 @@ import asyncio
 import logging
 import os
 import threading
-import time
 import urllib.request
 import weakref
 from http.cookiejar import Cookie, CookieJar
@@ -52,7 +51,6 @@ class CookieStore:
         # The file's mtime when it was last read or written here; a different one means the admin replaced it.
         self._seen: int | None = None
         self.logged_in: bool | None = None
-        self.last_refresh: float | None = None
 
     def __len__(self) -> int:
         return len(self._jar)
@@ -121,7 +119,6 @@ class CookieStore:
             with opener.open(request, timeout=20) as response:
                 page = response.read(4 * 1024 * 1024).decode("utf-8", "replace")
             self.logged_in = '"LOGGED_IN":true' in page
-            self.last_refresh = time.time()
             self._save()
             return self.logged_in
 

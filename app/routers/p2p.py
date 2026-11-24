@@ -309,11 +309,6 @@ def _authenticate(room: _Room | None, authorization: str) -> _Peer | None:
 router = APIRouter(prefix="/p2p")
 
 
-@router.get("/config")
-async def p2p_config() -> dict:
-    return {"protocol": 1, "enabled": bool(config.P2P_SERVER_TOKEN), "stun_urls": list(config.P2P_STUN_URLS)}
-
-
 @router.post("/sessions", dependencies=[Depends(_server)])
 async def open_session(body: _HostRequest, response: Response) -> dict:
     if len(_rooms) >= MAX_ROOMS:
