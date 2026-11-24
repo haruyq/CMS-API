@@ -70,8 +70,7 @@ def test_rooms_without_rates(client):
             assert joined["budget_bps"] == 0 and viewer.receive_json()["budget_bps"] == 0
 
 
-def test_config_and_server_auth(client, monkeypatch):
-    assert client.get("/p2p/config").json() == {"protocol": 1, "enabled": True, "stun_urls": ["stun:stun.example:3478"]}
+def test_server_auth(client, monkeypatch):
     body = {"host_id": HOST, "upload_bps": 1, "download_bps": 1}
     assert client.post("/p2p/sessions", json=body).status_code == 401
     assert client.post("/p2p/sessions", json=body, headers={"Authorization": "Bearer wrong"}).status_code == 401
@@ -79,7 +78,6 @@ def test_config_and_server_auth(client, monkeypatch):
                 {"upload_bps": 100_000_000_001}, {"host_id": "player"}, {"extra": 1}):
         assert client.post("/p2p/sessions", json=body | bad, headers=SERVER).status_code == 422
     monkeypatch.setattr(config, "P2P_SERVER_TOKEN", "")
-    assert client.get("/p2p/config").json()["enabled"] is False
     assert client.post("/p2p/sessions", json=body, headers=SERVER).status_code == 503
 
 

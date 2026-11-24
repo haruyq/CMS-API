@@ -273,12 +273,6 @@ def _index_data(track: Track):
     raise ProviderError("この分離映像形式のDASHインデックスには対応していません")
 
 
-def segment_base(track: Track) -> tuple[str, str]:
-    """Compatibility helper for callers that need the initialization/index ranges."""
-    _, init, index, _, _ = _index_data(track)
-    return init, index
-
-
 def parse_sidx(data: bytes, start: int, end: int) -> dict:
     """Materialize SIDX references for VLC 3's SegmentList bootstrap.
 
