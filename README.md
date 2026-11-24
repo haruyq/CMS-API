@@ -77,7 +77,7 @@ uv run --no-sync --env-file .env uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 |  名前  |  既定値  |  内容  |
 |   ---   |   ---   |   ---   |
-| `ALLOWED_HOSTS` | `youtube.com,youtu.be,discordapp.com,discordapp.net,tver.jp,cctv.com,cntv.cn,cntv.com,bilibili.com,b23.tv,iwara.tv` | APIが取得対象とするホスト(サブドメイン含む) |
+| `ALLOWED_HOSTS` | `...` | APIが取得対象とするホスト(サブドメイン含む) |
 | `MAX_STREAMS` | `32` | 最大ストリーム数 |
 | `RESOLVE_CACHE_SECONDS` | `1800` | 解決したURLをキャッシュする時間 |
 | `YTDLP_UPDATE_HOURS` | `24` | [yt-dlp](https://github.com/yt-dlp/yt-dlp)の更新を確認する間隔 |
